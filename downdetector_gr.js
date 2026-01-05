@@ -68,8 +68,22 @@ function postJson(urlString, payload) {
 
     // UNCHANGED wait condition
     await page.waitForFunction(() => document.querySelectorAll("h5").length > 0, {
-      timeout: 15000,
+      timeout: 30000,
     });
+
+// Αν παρ’ όλα αυτά κάτι πάει στραβά, θέλουμε debug πριν σκάσει παρακάτω
+    const h5Count = await page.evaluate(() => document.querySelectorAll("h5").length);
+    if (!h5Count) {
+      const title = await page.title().catch(() => "");
+      const url = page.url();
+      const html = await page.content().catch(() => "");
+      const htmlPreview = html.slice(0, 2000); // μικρό snippet, όχι όλο
+    
+      throw new Error(
+        `No h5 found. title="${title}" url="${url}" htmlPreview="${htmlPreview.replace(/\s+/g, " ")}"`
+      );
+    }
+
 
     // UNCHANGED scrape logic
     const rows = await page.evaluate(() => {
@@ -154,3 +168,4 @@ function postJson(urlString, payload) {
     }
   }
 })();
+
