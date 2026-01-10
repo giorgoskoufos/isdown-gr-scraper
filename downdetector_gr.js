@@ -68,7 +68,7 @@ function postJson(urlString, payload) {
 
     // UNCHANGED wait condition
     await page.waitForFunction(() => document.querySelectorAll("h5").length > 0, {
-      timeout: 30000,
+      timeout: 60000,
     });
 
 // Αν παρ’ όλα αυτά κάτι πάει στραβά, θέλουμε debug πριν σκάσει παρακάτω
@@ -168,4 +168,5 @@ function postJson(urlString, payload) {
     }
   }
 })();
+
 
