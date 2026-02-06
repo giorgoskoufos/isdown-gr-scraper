@@ -1,12 +1,18 @@
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-extra"); // Αλλαγή σε extra
+const StealthPlugin = require("puppeteer-extra-plugin-stealth"); // Plugin
 const https = require("https");
+
+// Ενεργοποίηση Stealth Mode (Κρύβει ότι είναι headless)
+puppeteer.use(StealthPlugin());
 
 const WEBHOOK_URL = "https://n8n-koufos.onrender.com/webhook/pc/puppeteer/downdetector";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Helper για POST requests
 function postJson(urlString, payload) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString);
+    // Προσοχή: Το base64 screenshot μπορεί να είναι μεγάλο, αυξάνουμε το όριο αν χρειαστεί στο n8n
     const data = Buffer.from(JSON.stringify(payload), "utf8");
 
     const req = https.request(
@@ -40,52 +46,61 @@ function postJson(urlString, payload) {
 
 (async () => {
   let browser = null;
+  let page = null;
 
   try {
+    console.log("Launching Stealth Puppeteer...");
+    
     browser = await puppeteer.launch({
       headless: "new",
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      defaultViewport: null,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      args: [
+        "--no-sandbox", 
+        "--disable-setuid-sandbox", 
+        "--disable-dev-shm-usage",
+        "--window-size=1920,1080" // Ορίζουμε μέγεθος παραθύρου
+      ],
     });
 
-    const page = await browser.newPage();
+    page = await browser.newPage();
+
+    // 1. Τυχαίο Viewport για να φαίνεται φυσικό
+    await page.setViewport({ width: 1366, height: 768 + Math.floor(Math.random() * 100) });
+
+    // 2. Πιο "πλούσιο" User Agent
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     );
 
-    await page.goto("https://downdetector.gr/", { waitUntil: "domcontentloaded" });
-    await sleep(2500);
-
-    // Accept cookies if exists (safe) — UNCHANGED logic
-    try {
-      const btn = await page.$("#onetrust-accept-btn-handler");
-      if (btn) await btn.click().catch(() => {});
-    } catch (e) {
-      // ignore - cookie banner not present / click failed
-    }
-    await sleep(1200);
-
-    // UNCHANGED wait condition
-    await page.waitForFunction(() => document.querySelectorAll("h5").length > 0, {
-      timeout: 60000,
+    // 3. Extra headers που στέλνουν οι κανονικοί browsers
+    await page.setExtraHTTPHeaders({
+        'Accept-Language': 'el-GR,el;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://www.google.com/'
     });
 
-// Αν παρ’ όλα αυτά κάτι πάει στραβά, θέλουμε debug πριν σκάσει παρακάτω
-    const h5Count = await page.evaluate(() => document.querySelectorAll("h5").length);
-    if (!h5Count) {
-      const title = await page.title().catch(() => "");
-      const url = page.url();
-      const html = await page.content().catch(() => "");
-      const htmlPreview = html.slice(0, 2000); // μικρό snippet, όχι όλο
+    console.log("Navigating...");
     
-      throw new Error(
-        `No h5 found. title="${title}" url="${url}" htmlPreview="${htmlPreview.replace(/\s+/g, " ")}"`
-      );
+    // Χρήση waitUntil 'networkidle2' για να περιμένουμε να ηρεμήσει το δίκτυο (χρήσιμο για cloudflare challenges)
+    await page.goto("https://downdetector.gr/", { waitUntil: "networkidle2", timeout: 60000 });
+
+    // Cookie Consent Logic
+    try {
+      const btn = await page.$("#onetrust-accept-btn-handler");
+      if (btn) {
+          await btn.click();
+          await sleep(1000);
+      }
+    } catch (e) {}
+
+    // Έλεγχος αν υπάρχει το h5. Αν όχι, screenshot και throw.
+    const h5Count = await page.evaluate(() => document.querySelectorAll("h5").length);
+    
+    if (h5Count === 0) {
+        throw new Error("No h5 elements found (Possible Blocking)");
     }
 
-
-    // UNCHANGED scrape logic
+    // --- SCRAPING LOGIC (ΙΔΙΟ) ---
     const rows = await page.evaluate(() => {
       const findSparkline = (root) => {
         if (!root) return null;
@@ -123,50 +138,63 @@ function postJson(urlString, payload) {
         .filter(Boolean);
     });
 
-    // Keep console output (as you had) — still useful for local debugging
-    console.log(JSON.stringify(rows, null, 2));
+    console.log(`Scraped ${rows.length} items.`);
 
-    // NEW: send to webhook
-    const payload = {
+    // Success Webhook
+    await postJson(WEBHOOK_URL, {
       ok: true,
       source: "downdetector.gr",
       timestamp: new Date().toISOString(),
       data: rows,
-    };
+    });
 
-    const res = await postJson(WEBHOOK_URL, payload);
-    if (!res.ok) {
-      throw new Error(`Webhook POST failed: ${res.status} ${res.body || ""}`);
+    console.log("Success.");
+
+  } catch (err) {
+    console.error("Error detected:", err.message);
+
+    // --- PRO DEBUG: Screenshot to Base64 ---
+    let screenshotBase64 = null;
+    let pageTitle = "Unknown";
+    let pageContentShort = "";
+
+    if (page) {
+        try {
+            // Παίρνουμε screenshot σε base64 string (όχι αρχείο)
+            screenshotBase64 = await page.screenshot({ encoding: "base64", fullPage: false });
+            pageTitle = await page.title();
+            const content = await page.content();
+            pageContentShort = content.slice(0, 1000); // Πρώτοι 1000 χαρακτήρες για text debug
+        } catch (screenshotErr) {
+            console.error("Could not take screenshot:", screenshotErr);
+        }
     }
 
-    console.log(`Webhook OK: ${res.status}`);
-  } catch (err) {
-    // NEW: report error to webhook too (best-effort)
-    const payload = {
+    // Error Webhook με εικόνα
+    const errorPayload = {
       ok: false,
       source: "downdetector.gr",
       timestamp: new Date().toISOString(),
-      error: String(err?.message || err),
-      data: null,
+      error: err.message,
+      debug: {
+        title: pageTitle,
+        html_preview: pageContentShort,
+        // Στο n8n μπορείς να κάνεις render αυτό το string ως εικόνα 
+        // ή να το σώσεις σε binary file node.
+        screenshot_base64: screenshotBase64 
+      }
     };
 
     try {
-      const res = await postJson(WEBHOOK_URL, payload);
-      console.error(`Webhook ERROR report: ${res.status}`);
+      await postJson(WEBHOOK_URL, errorPayload);
+      console.log("Error report sent to webhook.");
     } catch (e) {
-      console.error("Failed to POST error to webhook:", e);
+      console.error("Failed to send error webhook:", e);
     }
-
-    console.error("Fatal:", err);
+    
     process.exitCode = 1;
+
   } finally {
-    // ✅ NEW: guaranteed close (prevents orphan chrome processes / RAM burn)
-    if (browser) {
-      try {
-        await browser.close();
-      } catch {}
-    }
+    if (browser) await browser.close();
   }
 })();
-
-
