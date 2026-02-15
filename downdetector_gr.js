@@ -5,7 +5,7 @@ const https = require("https");
 // Ενεργοποίηση Stealth Mode (Κρύβει ότι είναι headless)
 puppeteer.use(StealthPlugin());
 
-const WEBHOOK_URL = "https://n8n-koufos.onrender.com/webhook/pc/puppeteer/downdetector";
+const WEBHOOK_URL = "https://automations-n8n.xadp6y.easypanel.host/webhook/pc/puppeteer/downdetector";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Helper για POST requests
@@ -197,4 +197,5 @@ function postJson(urlString, payload) {
   } finally {
     if (browser) await browser.close();
   }
+
 })();
