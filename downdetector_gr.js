@@ -93,11 +93,11 @@ function postJson(urlString, payload) {
       }
     } catch (e) {}
 
-    // Έλεγχος αν υπάρχει το h5. Αν όχι, screenshot και throw.
-    const h5Count = await page.evaluate(() => document.querySelectorAll("h5").length);
+    // Έλεγχος αν υπάρχει το h2. Αν όχι, screenshot και throw.
+    const h2Count = await page.evaluate(() => document.querySelectorAll("h2").length);
     
-    if (h5Count === 0) {
-        throw new Error("No h5 elements found (Possible Blocking)");
+    if (h2Count === 0) {
+        throw new Error("No h2 elements found (Possible Blocking)");
     }
 
     // --- SCRAPING LOGIC (ΙΔΙΟ) ---
@@ -107,30 +107,30 @@ function postJson(urlString, payload) {
         return root.querySelector("svg.sparkline.danger") || root.querySelector("svg.sparkline");
       };
 
-      return Array.from(document.querySelectorAll("h5"))
-        .map((h5) => {
-          const title = (h5.innerText || h5.textContent || "").trim();
+      return Array.from(document.querySelectorAll("h2"))
+        .map((h2) => {
+          const title = (h2.innerText || h2.textContent || "").trim();
           if (!title) return null;
 
           const container =
-            h5.closest("article") ||
-            h5.closest("section") ||
-            h5.closest("li") ||
-            h5.closest("div");
+            h2.closest("article") ||
+            h2.closest("section") ||
+            h2.closest("li") ||
+            h2.closest("div");
 
           let svg = findSparkline(container);
           if (!svg && container) svg = findSparkline(container.parentElement);
 
           if (!svg) {
             return {
-              h5: title,
+              h2: title,
               sparkline_class: null,
               sparkline_values_raw: null,
             };
           }
 
           return {
-            h5: title,
+            h2: title,
             sparkline_class: svg.getAttribute("class"),
             sparkline_values_raw: svg.getAttribute("data-values"),
           };
@@ -199,3 +199,4 @@ function postJson(urlString, payload) {
   }
 
 })();
+
